@@ -1,0 +1,7 @@
+pandas>=2.2
+flask>=3.0
+matplotlib>=3.8
+seaborn>=0.13
+tqdm>=4.66
+pillow>=10
+py-feat>=0.6; python_version < "3.12"

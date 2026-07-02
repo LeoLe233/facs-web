@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FACS Illustration Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="toolbar">
+        <div>
+          <h1>FACS Illustration Analyzer</h1>
+          <p>Upload an anime, comic, or human face image to inspect face detection, AU scores, and possible emotions.</p>
+        </div>
+        <form class="upload-form" method="post" enctype="multipart/form-data">
+          <input id="image" name="image" type="file" accept="image/*" required>
+          <button type="submit">Analyze</button>
+        </form>
+      </section>
+
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <div class="notice">{{ messages[0] }}</div>
+        {% endif %}
+      {% endwith %}
+
+      {% if result %}
+        <section class="result-grid">
+          <div class="media-panel">
+            <div class="panel-head">
+              <h2>Processed Image</h2>
+              <span>{{ result.filename }}</span>
+            </div>
+            {% if result.overlay_urls %}
+              <img class="main-image" src="{{ result.overlay_urls[0] }}" alt="Detected AU overlay">
+            {% else %}
+              <img class="main-image" src="{{ result.original_url }}" alt="Uploaded image">
+            {% endif %}
+          </div>
+
+          <aside class="side-panel">
+            <h2>Detected Faces</h2>
+            {% for face in result.face_cards %}
+              <article class="face-card">
+                <div class="face-title">
+                  <strong>Face {{ face.face_index + 1 }}</strong>
+                  <span>{{ "detected" if face.success else "not detected" }}</span>
+                </div>
+
+                {% if face.emotions %}
+                  <div class="metric-block">
+                    <h3>Possible Emotions</h3>
+                    {% for emotion in face.emotions[:5] %}
+                      <div class="bar-row">
+                        <span>{{ emotion.name }}</span>
+                        <div class="bar"><i style="width: {{ (emotion.score * 100)|round(1) }}%"></i></div>
+                        <b>{{ "%.2f"|format(emotion.score) }}</b>
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+
+                {% if face.aus %}
+                  <div class="metric-block">
+                    <h3>Top AUs</h3>
+                    {% for au in face.aus[:8] %}
+                      <div class="bar-row compact">
+                        <span>{{ au.name }}</span>
+                        <div class="bar au"><i style="width: {{ (au.score * 100)|round(1) }}%"></i></div>
+                        <b>{{ "%.2f"|format(au.score) }}</b>
+                      </div>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </aside>
+        </section>
+
+        <section class="summary-grid">
+          {% if result.plot_urls.mean_emotion_heatmap %}
+            <div class="summary-panel">
+              <h2>Emotion Summary</h2>
+              <img src="{{ result.plot_urls.mean_emotion_heatmap }}" alt="Emotion heatmap">
+            </div>
+          {% endif %}
+          {% if result.plot_urls.mean_au_heatmap %}
+            <div class="summary-panel">
+              <h2>AU Summary</h2>
+              <img src="{{ result.plot_urls.mean_au_heatmap }}" alt="AU heatmap">
+            </div>
+          {% endif %}
+        </section>
+
+        <section class="downloads">
+          <h2>CSV Outputs</h2>
+          <div class="download-list">
+            {% for label, href in result.downloads.items() %}
+              {% if href %}
+                <a href="{{ href }}">{{ label }}</a>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </section>
+      {% else %}
+        <section class="empty-state">
+          <div>
+            <h2>No image analyzed yet</h2>
+            <p>The result view will show the processed overlay, possible emotions, AU scores, summary charts, and downloadable CSV files.</p>
+          </div>
+        </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+.cache/
+__pycache__/
+results/
+web_runs/
+.venv/
+.venv311/
+data/
+results/
+.DS_Store
