@@ -11,13 +11,26 @@
       <section class="toolbar">
         <div>
           <h1>FACS Illustration Analyzer</h1>
-          <p>Upload an anime, comic, or human face image to inspect face detection, AU scores, and possible emotions.</p>
+          <p>Upload anime, comic, or human face images to inspect face detection, AU scores, and possible emotions.</p>
         </div>
-        <form class="upload-form" method="post" enctype="multipart/form-data">
-          <input id="image" name="image" type="file" accept="image/*" required>
+        <form class="upload-form" method="post" enctype="multipart/form-data" data-analysis-form>
+          <input id="images" name="images" type="file" accept="image/*" multiple required>
           <button type="submit">Analyze</button>
         </form>
       </section>
+
+      <div class="working-panel" data-working-panel hidden>
+        <div class="working-box">
+          <div class="working-title">
+            <span class="spinner" aria-hidden="true"></span>
+            <strong>Working...</strong>
+          </div>
+          <p>Analyzing the image for face detection, AUs, and possible emotions.</p>
+          <div class="progress-track" role="progressbar" aria-label="Analysis in progress">
+            <i></i>
+          </div>
+        </div>
+      </div>
 
       {% with messages = get_flashed_messages() %}
         {% if messages %}
@@ -25,84 +38,101 @@
         {% endif %}
       {% endwith %}
 
-      {% if result %}
-        <section class="result-grid">
-          <div class="media-panel">
-            <div class="panel-head">
-              <h2>Processed Image</h2>
-              <span>{{ result.filename }}</span>
-            </div>
-            {% if result.overlay_urls %}
-              <img class="main-image" src="{{ result.overlay_urls[0] }}" alt="Detected AU overlay">
-            {% else %}
-              <img class="main-image" src="{{ result.original_url }}" alt="Uploaded image">
-            {% endif %}
+      {% if results %}
+        <section class="result-selector" data-result-selector>
+          <button type="button" class="arrow-button" data-result-prev aria-label="Previous result">&larr;</button>
+          <div>
+            <strong data-result-title>{{ results[0].filename }}</strong>
+            <span><b data-result-position>1</b> / {{ results|length }}</span>
           </div>
+          <button type="button" class="arrow-button" data-result-next aria-label="Next result">&rarr;</button>
+        </section>
 
-          <aside class="side-panel">
-            <h2>Detected Faces</h2>
-            {% for face in result.face_cards %}
-              <article class="face-card">
-                <div class="face-title">
-                  <strong>Face {{ face.face_index + 1 }}</strong>
-                  <span>{{ "detected" if face.success else "not detected" }}</span>
+        {% for result in results %}
+          <section class="result-slide" data-result-slide data-result-filename="{{ result.filename }}" {% if not loop.first %}hidden{% endif %}>
+            {% if result.error %}
+              <div class="notice">Analysis failed for {{ result.filename }}: {{ result.error }}</div>
+            {% else %}
+              <section class="result-grid">
+                <div class="media-panel">
+                  <div class="panel-head">
+                    <h2>Processed Image</h2>
+                    <span>{{ result.filename }}</span>
+                  </div>
+                  {% if result.overlay_urls %}
+                    <img class="main-image" src="{{ result.overlay_urls[0] }}" alt="Detected AU overlay">
+                  {% else %}
+                    <img class="main-image" src="{{ result.original_url }}" alt="Uploaded image">
+                  {% endif %}
                 </div>
 
-                {% if face.emotions %}
-                  <div class="metric-block">
-                    <h3>Possible Emotions</h3>
-                    {% for emotion in face.emotions[:5] %}
-                      <div class="bar-row">
-                        <span>{{ emotion.name }}</span>
-                        <div class="bar"><i style="width: {{ (emotion.score * 100)|round(1) }}%"></i></div>
-                        <b>{{ "%.2f"|format(emotion.score) }}</b>
+                <aside class="side-panel">
+                  <h2>Detected Faces</h2>
+                  {% for face in result.face_cards %}
+                    <article class="face-card">
+                      <div class="face-title">
+                        <strong>Face {{ face.face_index + 1 }}</strong>
+                        <span>{{ "detected" if face.success else "not detected" }}</span>
                       </div>
-                    {% endfor %}
+
+                      {% if face.emotions %}
+                        <div class="metric-block">
+                          <h3>Possible Emotions</h3>
+                          {% for emotion in face.emotions[:5] %}
+                            <div class="bar-row">
+                              <span>{{ emotion.name }}</span>
+                              <div class="bar"><i style="width: {{ (emotion.score * 100)|round(1) }}%"></i></div>
+                              <b>{{ "%.2f"|format(emotion.score) }}</b>
+                            </div>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+
+                      {% if face.aus %}
+                        <div class="metric-block">
+                          <h3>Top AUs</h3>
+                          {% for au in face.aus[:8] %}
+                            <div class="bar-row au-row">
+                              <span><strong>{{ au.name }}</strong><small>{{ au.description }}</small></span>
+                              <div class="bar au"><i style="width: {{ (au.score * 100)|round(1) }}%"></i></div>
+                              <b>{{ "%.2f"|format(au.score) }}</b>
+                            </div>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                    </article>
+                  {% endfor %}
+                </aside>
+              </section>
+
+              <section class="summary-grid">
+                {% if result.plot_urls.mean_emotion_heatmap %}
+                  <div class="summary-panel">
+                    <h2>Emotion Summary</h2>
+                    <img src="{{ result.plot_urls.mean_emotion_heatmap }}" alt="Emotion heatmap">
                   </div>
                 {% endif %}
-
-                {% if face.aus %}
-                  <div class="metric-block">
-                    <h3>Top AUs</h3>
-                    {% for au in face.aus[:8] %}
-                      <div class="bar-row compact">
-                        <span>{{ au.name }}</span>
-                        <div class="bar au"><i style="width: {{ (au.score * 100)|round(1) }}%"></i></div>
-                        <b>{{ "%.2f"|format(au.score) }}</b>
-                      </div>
-                    {% endfor %}
+                {% if result.plot_urls.mean_au_heatmap %}
+                  <div class="summary-panel">
+                    <h2>AU Summary</h2>
+                    <img src="{{ result.plot_urls.mean_au_heatmap }}" alt="AU heatmap">
                   </div>
                 {% endif %}
-              </article>
-            {% endfor %}
-          </aside>
-        </section>
+              </section>
 
-        <section class="summary-grid">
-          {% if result.plot_urls.mean_emotion_heatmap %}
-            <div class="summary-panel">
-              <h2>Emotion Summary</h2>
-              <img src="{{ result.plot_urls.mean_emotion_heatmap }}" alt="Emotion heatmap">
-            </div>
-          {% endif %}
-          {% if result.plot_urls.mean_au_heatmap %}
-            <div class="summary-panel">
-              <h2>AU Summary</h2>
-              <img src="{{ result.plot_urls.mean_au_heatmap }}" alt="AU heatmap">
-            </div>
-          {% endif %}
-        </section>
-
-        <section class="downloads">
-          <h2>CSV Outputs</h2>
-          <div class="download-list">
-            {% for label, href in result.downloads.items() %}
-              {% if href %}
-                <a href="{{ href }}">{{ label }}</a>
-              {% endif %}
-            {% endfor %}
-          </div>
-        </section>
+              <section class="downloads">
+                <h2>CSV Outputs</h2>
+                <div class="download-list">
+                  {% for label, href in result.downloads.items() %}
+                    {% if href %}
+                      <a href="{{ href }}">{{ label }}</a>
+                    {% endif %}
+                  {% endfor %}
+                </div>
+              </section>
+            {% endif %}
+          </section>
+        {% endfor %}
       {% else %}
         <section class="empty-state">
           <div>
@@ -112,5 +142,46 @@
         </section>
       {% endif %}
     </main>
+    <script>
+      const form = document.querySelector("[data-analysis-form]");
+      const workingPanel = document.querySelector("[data-working-panel]");
+      const slides = Array.from(document.querySelectorAll("[data-result-slide]"));
+      const prevButton = document.querySelector("[data-result-prev]");
+      const nextButton = document.querySelector("[data-result-next]");
+      const resultTitle = document.querySelector("[data-result-title]");
+      const resultPosition = document.querySelector("[data-result-position]");
+      let activeSlide = 0;
+
+      if (form && workingPanel) {
+        form.addEventListener("submit", () => {
+          const button = form.querySelector("button[type='submit']");
+          workingPanel.hidden = false;
+          form.classList.add("is-submitting");
+          if (button) {
+            button.disabled = true;
+            button.textContent = "Analyzing...";
+          }
+        });
+      }
+
+      function showSlide(index) {
+        if (!slides.length) return;
+        activeSlide = (index + slides.length) % slides.length;
+        slides.forEach((slide, slideIndex) => {
+          slide.hidden = slideIndex !== activeSlide;
+        });
+        if (resultTitle) {
+          resultTitle.textContent = slides[activeSlide].dataset.resultFilename || "";
+        }
+        if (resultPosition) {
+          resultPosition.textContent = String(activeSlide + 1);
+        }
+      }
+
+      if (prevButton && nextButton && slides.length) {
+        prevButton.addEventListener("click", () => showSlide(activeSlide - 1));
+        nextButton.addEventListener("click", () => showSlide(activeSlide + 1));
+      }
+    </script>
   </body>
 </html>

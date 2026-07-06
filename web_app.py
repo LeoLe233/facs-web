@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
@@ -13,7 +13,9 @@ from werkzeug.utils import secure_filename
 
 from facs_anime_analysis import (
     IMAGE_EXTENSIONS,
+    describe_au,
     emotion_columns,
+    normalize_au_code,
 )
 
 
@@ -22,6 +24,8 @@ WEB_RUNS_DIR = BASE_DIR / "web_runs"
 UPLOAD_DIR = WEB_RUNS_DIR / "uploads"
 RESULTS_DIR = WEB_RUNS_DIR / "results"
 ALLOWED_EXTENSIONS = {extension.lstrip(".") for extension in IMAGE_EXTENSIONS}
+ANALYZER_PYTHON = Path(os.environ.get("FACS_ANALYZER_PYTHON", BASE_DIR / ".venv311" / "bin" / "python"))
+MAX_ANALYSIS_WORKERS = max(1, int(os.environ.get("FACS_WEB_MAX_WORKERS", "2")))
 
 
 app = Flask(__name__)
@@ -33,15 +37,21 @@ def allowed_file(filename: str) -> bool:
 
 
 def static_result_url(run_id: str, relative_path: str) -> str:
-    return url_for("serve_result_file", run_id=run_id, filename=relative_path)
+    return f"/results/{run_id}/{relative_path}"
+
+
+def static_upload_url(run_id: str, filename: str) -> str:
+    return f"/uploads/{run_id}/{filename}"
 
 
 def row_records(df: pd.DataFrame, limit: int = 8) -> list[dict[str, object]]:
     if df.empty:
         return []
     clean = df.head(limit).copy()
-    clean = clean.where(pd.notna(clean), None)
-    return clean.to_dict(orient="records")
+    clean = clean.astype(object)
+    clean[pd.isna(clean)] = None
+    records = clean.to_dict(orient="records")
+    return [{str(key): value for key, value in record.items()} for record in records]
 
 
 def read_csv_if_exists(path: Path) -> pd.DataFrame:
@@ -54,8 +64,14 @@ def analyze_upload(image_path: Path, run_id: str) -> dict[str, object]:
     run_input_dir.mkdir(parents=True, exist_ok=True)
     run_output_dir.mkdir(parents=True, exist_ok=True)
 
+    if not ANALYZER_PYTHON.exists():
+        raise RuntimeError(
+            f"Analyzer Python not found at {ANALYZER_PYTHON}. "
+            "Run the app with .venv311, or set FACS_ANALYZER_PYTHON to the Python that has Py-Feat installed."
+        )
+
     command = [
-        sys.executable,
+        str(ANALYZER_PYTHON),
         str(BASE_DIR / "facs_anime_analysis.py"),
         "--backend",
         "pyfeat",
@@ -74,13 +90,15 @@ def analyze_upload(image_path: Path, run_id: str) -> dict[str, object]:
     results = read_csv_if_exists(run_output_dir / "au_results.csv")
     detection_summary = read_csv_if_exists(run_output_dir / "detection_summary.csv")
     au_summary = read_csv_if_exists(run_output_dir / "au_summary.csv")
+    au_reference = read_csv_if_exists(run_output_dir / "au_reference.csv")
     emotion_predictions = read_csv_if_exists(run_output_dir / "emotion_predictions.csv")
     emotion_summary = read_csv_if_exists(run_output_dir / "emotion_summary.csv")
 
     emotion_cols = emotion_columns(results)
     detections = results.copy()
     detections["face_index"] = detections.groupby("image_path").cumcount() if "image_path" in detections else 0
-    detections = detections.where(pd.notna(detections), None)
+    detections = detections.astype(object)
+    detections[pd.isna(detections)] = None
 
     face_cards = []
     for _, row in detections.iterrows():
@@ -101,7 +119,15 @@ def analyze_upload(image_path: Path, run_id: str) -> dict[str, object]:
         for col in au_cols:
             value = row[col]
             if value is not None:
-                aus.append({"name": col, "score": float(value)})
+                code = normalize_au_code(col)
+                aus.append(
+                    {
+                        "name": code,
+                        "column": col,
+                        "description": describe_au(code),
+                        "score": float(value),
+                    }
+                )
         aus = sorted(aus, key=lambda item: item["score"], reverse=True)[:10]
 
         face_cards.append(
@@ -122,16 +148,18 @@ def analyze_upload(image_path: Path, run_id: str) -> dict[str, object]:
     return {
         "run_id": run_id,
         "filename": image_path.name,
-        "original_url": url_for("serve_upload_file", run_id=run_id, filename=image_path.name),
+        "original_url": static_upload_url(run_id, image_path.name),
         "overlay_urls": [static_result_url(run_id, f"au_overlays/{path.name}") for path in overlay_paths],
         "plot_urls": plot_paths,
         "detection_summary": row_records(detection_summary),
+        "au_reference": row_records(au_reference, limit=32),
         "emotion_predictions": row_records(emotion_predictions),
         "emotion_summary": row_records(emotion_summary),
         "au_summary": row_records(au_summary),
         "face_cards": face_cards,
         "downloads": {
             "AU results": static_result_url(run_id, "au_results.csv"),
+            "AU reference": static_result_url(run_id, "au_reference.csv") if (run_output_dir / "au_reference.csv").exists() else None,
             "Detection summary": static_result_url(run_id, "detection_summary.csv"),
             "AU summary": static_result_url(run_id, "au_summary.csv") if (run_output_dir / "au_summary.csv").exists() else None,
             "Emotion predictions": static_result_url(run_id, "emotion_predictions.csv") if (run_output_dir / "emotion_predictions.csv").exists() else None,
@@ -140,35 +168,90 @@ def analyze_upload(image_path: Path, run_id: str) -> dict[str, object]:
     }
 
 
+def failed_result(image_path: Path, error: str) -> dict[str, object]:
+    return {
+        "run_id": "",
+        "filename": image_path.name,
+        "original_url": "",
+        "overlay_urls": [],
+        "plot_urls": {},
+        "detection_summary": [],
+        "au_reference": [],
+        "emotion_predictions": [],
+        "emotion_summary": [],
+        "au_summary": [],
+        "face_cards": [],
+        "downloads": {},
+        "error": error,
+    }
+
+
+def analyze_upload_batch(image_paths: list[Path], batch_id: str) -> list[dict[str, object]]:
+    indexed_paths = list(enumerate(image_paths))
+    results: list[dict[str, object] | None] = [None] * len(indexed_paths)
+    worker_count = min(MAX_ANALYSIS_WORKERS, len(indexed_paths))
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(analyze_upload, image_path, f"{batch_id}_{index:03d}"): (index, image_path)
+            for index, image_path in indexed_paths
+        }
+        for future in as_completed(futures):
+            index, image_path = futures[future]
+            try:
+                results[index] = future.result()
+            except Exception as exc:
+                results[index] = failed_result(image_path, str(exc))
+
+    return [result for result in results if result is not None]
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        uploaded = request.files.get("image")
-        if uploaded is None or uploaded.filename == "":
-            flash("Choose an image first.")
-            return redirect(url_for("index"))
-        if not allowed_file(uploaded.filename):
-            flash("Upload a PNG, JPG, JPEG, WEBP, BMP, TIF, or TIFF image.")
-            return redirect(url_for("index"))
+        uploads = [
+            uploaded
+            for uploaded in request.files.getlist("images")
+            if uploaded is not None and uploaded.filename
+        ]
+        if not uploads:
+            single_upload = request.files.get("image")
+            if single_upload is not None and single_upload.filename:
+                uploads = [single_upload]
 
-        run_id = uuid.uuid4().hex[:12]
-        run_input_dir = UPLOAD_DIR / run_id
-        run_input_dir.mkdir(parents=True, exist_ok=True)
-        filename = secure_filename(uploaded.filename)
-        image_path = run_input_dir / filename
-        uploaded.save(image_path)
-
-        try:
-            result = analyze_upload(image_path, run_id)
-        except Exception as exc:
-            shutil.rmtree(UPLOAD_DIR / run_id, ignore_errors=True)
-            shutil.rmtree(RESULTS_DIR / run_id, ignore_errors=True)
-            flash(f"Analysis failed: {exc}")
+        if not uploads:
+            flash("Choose at least one image first.")
             return redirect(url_for("index"))
 
-        return render_template("index.html", result=result)
+        invalid_names = [uploaded.filename for uploaded in uploads if not allowed_file(uploaded.filename)]
+        if invalid_names:
+            flash("Upload only PNG, JPG, JPEG, WEBP, BMP, TIF, or TIFF images.")
+            return redirect(url_for("index"))
 
-    return render_template("index.html", result=None)
+        batch_id = uuid.uuid4().hex[:12]
+        image_paths = []
+        for index, uploaded in enumerate(uploads):
+            item_run_id = f"{batch_id}_{index:03d}"
+            run_input_dir = UPLOAD_DIR / item_run_id
+            run_input_dir.mkdir(parents=True, exist_ok=True)
+            filename = secure_filename(uploaded.filename)
+            if not filename:
+                filename = f"upload_{index}.png"
+            image_path = run_input_dir / filename
+            uploaded.save(image_path)
+            image_paths.append(image_path)
+
+        results = analyze_upload_batch(image_paths, batch_id)
+        successful_results = [result for result in results if not result.get("error")]
+        if not successful_results:
+            for image_path in image_paths:
+                shutil.rmtree(image_path.parent, ignore_errors=True)
+            flash(f"Analysis failed: {results[0].get('error') if results else 'unknown error'}")
+            return redirect(url_for("index"))
+
+        return render_template("index.html", result=successful_results[0], results=results)
+
+    return render_template("index.html", result=None, results=[])
 
 
 @app.route("/uploads/<run_id>/<path:filename>")

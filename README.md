@@ -78,6 +78,7 @@ python facs_anime_analysis.py --backend openface --openface-bin /path/to/Feature
 ## Outputs
 
 - `results/au_results.csv`: one row per detected frame/image, including AU columns when available.
+- `results/au_reference.csv`: AU code, FACS action description, and approximate overlay region names.
 - `results/detection_summary.csv`: detection count and detection rate overall or by metadata group.
 - `results/au_summary.csv`: mean AU values for detected images.
 - `results/emotion_predictions.csv`: top 3 possible emotions for each detected face.

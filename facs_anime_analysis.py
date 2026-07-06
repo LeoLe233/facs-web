@@ -38,27 +38,27 @@ class AnalysisConfig:
     au_overlay_top_n: int
 
 
-AU_REGION_LABELS = {
-    "AU01": "inner brow raiser",
-    "AU02": "outer brow raiser",
-    "AU04": "brow lowerer",
-    "AU05": "upper lid raiser",
-    "AU06": "cheek raiser",
-    "AU07": "lid tightener",
-    "AU09": "nose wrinkler",
-    "AU10": "upper lip raiser",
-    "AU11": "nasolabial deepener",
-    "AU12": "lip corner puller",
-    "AU14": "dimpler",
-    "AU15": "lip corner depressor",
-    "AU17": "chin raiser",
-    "AU20": "lip stretcher",
-    "AU23": "lip tightener",
-    "AU24": "lip pressor",
-    "AU25": "lips part",
-    "AU26": "jaw drop",
-    "AU28": "lip suck",
-    "AU43": "eye closure",
+AU_DESCRIPTIONS = {
+    "AU01": "Inner Brow Raiser",
+    "AU02": "Outer Brow Raiser",
+    "AU04": "Brow Lowerer",
+    "AU05": "Upper Lid Raiser",
+    "AU06": "Cheek Raiser",
+    "AU07": "Lid Tightener",
+    "AU09": "Nose Wrinkler",
+    "AU10": "Upper Lip Raiser",
+    "AU11": "Nasolabial Deepener",
+    "AU12": "Lip Corner Puller",
+    "AU14": "Dimpler",
+    "AU15": "Lip Corner Depressor",
+    "AU17": "Chin Raiser",
+    "AU20": "Lip Stretcher",
+    "AU23": "Lip Tightener",
+    "AU24": "Lip Pressor",
+    "AU25": "Lips Part",
+    "AU26": "Jaw Drop",
+    "AU28": "Lip Suck",
+    "AU43": "Eyes Closed",
 }
 
 
@@ -104,6 +104,31 @@ def au_columns(df: pd.DataFrame) -> list[str]:
         for col in df.columns
         if col.startswith(AU_PREFIXES) and (col.endswith("_r") or col.endswith("_c") or col[2:4].isdigit())
     ]
+
+
+def normalize_au_code(value: str) -> str:
+    upper = value.upper()
+    if upper.startswith("AU") and len(upper) >= 4 and upper[2:4].isdigit():
+        return upper[:4]
+    return upper
+
+
+def describe_au(value: str) -> str:
+    return AU_DESCRIPTIONS.get(normalize_au_code(value), "Unknown AU description")
+
+
+def au_reference_frame(cols: Iterable[str] | None = None) -> pd.DataFrame:
+    codes = sorted({normalize_au_code(col) for col in cols} if cols else set(AU_DESCRIPTIONS))
+    rows = []
+    for code in codes:
+        rows.append(
+            {
+                "au": code,
+                "description": describe_au(code),
+                "overlay_regions": ", ".join(AU_REGION_GROUPS.get(code, ())),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def emotion_columns(df: pd.DataFrame) -> list[str]:
@@ -459,7 +484,7 @@ def active_aus(row: pd.Series, cols: list[str], threshold: float, top_n: int) ->
         value = row[col]
         if pd.isna(value):
             continue
-        au = col[:4].upper()
+        au = normalize_au_code(col)
         scored.append((au, float(value)))
 
     active = [(au, score) for au, score in scored if score >= threshold]
@@ -532,7 +557,7 @@ def save_au_overlays(results: pd.DataFrame, config: AnalysisConfig) -> None:
         label_lines = []
         for au_index, (au, score) in enumerate(active):
             color = cmap(au_index / max(1, len(active) - 1))
-            label_lines.append(f"{au} {score:.2f} - {AU_REGION_LABELS.get(au, 'AU region')}")
+            label_lines.append(f"{au} {score:.2f} - {describe_au(au)}")
 
             for region_name in AU_REGION_GROUPS.get(au, ()):
                 for polygon in regions.get(region_name, []):
@@ -645,6 +670,7 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     results.to_csv(config.output_dir / "au_results.csv", index=False)
     detection_summary.to_csv(config.output_dir / "detection_summary.csv", index=False)
+    au_reference_frame(au_columns(results)).to_csv(config.output_dir / "au_reference.csv", index=False)
     if not au_summary.empty:
         au_summary.to_csv(config.output_dir / "au_summary.csv", index=False)
     if not emotion_predictions.empty:
@@ -656,6 +682,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     save_au_overlays(results, config)
 
     print(f"Wrote {config.output_dir / 'au_results.csv'}")
+    print(f"Wrote {config.output_dir / 'au_reference.csv'}")
     print(f"Wrote {config.output_dir / 'detection_summary.csv'}")
     if not au_summary.empty:
         print(f"Wrote {config.output_dir / 'au_summary.csv'}")
