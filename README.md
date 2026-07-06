@@ -1,4 +1,4 @@
-# FACS/AU Testing on Anime and Comic Images
+# FACS/AU Testing Tool
 
 This project is a small research harness for testing common facial Action Unit (OpenFace/py-feat) tools.
 
@@ -6,6 +6,8 @@ It records two things that matter for your question:
 
 - Whether the tool detects a face at all.
 - Which AU scores/classes it returns when detection succeeds.
+
+Runs as a website based on Flask on port 5001.
 
 
 ## Setup
