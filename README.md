@@ -1,24 +1,12 @@
 # FACS/AU Testing on Anime and Comic Images
 
-This project is a small research harness for testing whether common facial Action Unit tools work on illustrated characters.
+This project is a small research harness for testing common facial Action Unit (OpenFace/py-feat) tools.
 
 It records two things that matter for your question:
 
 - Whether the tool detects a face at all.
 - Which AU scores/classes it returns when detection succeeds.
 
-## Folder Layout
-
-```text
-data/
-  images/          # put anime, comic, and comparison human images here
-  metadata.csv     # optional labels for style, expression, source, etc.
-results/
-  au_results.csv
-  detection_summary.csv
-  au_summary.csv
-  plots/
-```
 
 ## Setup
 
@@ -48,12 +36,6 @@ happy_01.png,anime,happy,manual,
 smile_panel.jpg,comic,happy,manual,
 human_smile.jpg,human,happy,comparison,
 ```
-
-Good experimental groups are usually:
-
-- `style`: `anime`, `comic`, `human`
-- `expected_expression`: `happy`, `anger`, `sad`, `surprise`, `neutral`
-- `source`: where the image came from
 
 ## Run With Py-Feat
 
