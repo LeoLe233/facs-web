@@ -12,32 +12,38 @@ Runs as a website based on Flask on port 5001.
 
 ## Setup
 
-Create and activate a virtual environment:
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/LeoLe233/facs-web.git
+   cd facs-web
+   ```
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+2. **Create and activate a virtual environment:**
 
-`py-feat` is included only for Python versions below 3.12 because many AU model stacks lag behind the newest Python releases. If you are on Python 3.12 and Py-Feat does not install, create the environment with Python 3.10 or 3.11, or use the OpenFace backend.
+   **On macOS/Linux:**
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
 
-## Add Images
+   **On Windows (Command Prompt):**
+   ```cmd
+   python -m venv .venv
+   .venv\Scripts\activate
+   ```
 
-Put images into:
+   **On Windows (PowerShell):**
+   ```powershell
+   python -m venv .venv
+   .venv\Scripts\Activate.ps1
+   ```
 
-```text
-data/images/
-```
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Then edit `data/metadata.csv` so each row names a file:
-
-```csv
-filename,style,expected_expression,source,notes
-happy_01.png,anime,happy,manual,
-smile_panel.jpg,comic,happy,manual,
-human_smile.jpg,human,happy,comparison,
-```
+**Note:** `py-feat` is included only for Python versions below 3.12 because many AU model stacks lag behind the newest Python releases. If you are on Python 3.12 and Py-Feat does not install, create the environment with Python 3.10 or 3.11, or use the OpenFace backend.
 
 ## Run With Py-Feat
 
@@ -59,19 +65,6 @@ If the binary is not on your PATH:
 python facs_anime_analysis.py --backend openface --openface-bin /path/to/FeatureExtraction
 ```
 
-## Outputs
-
-- `results/au_results.csv`: one row per detected frame/image, including AU columns when available.
-- `results/au_reference.csv`: AU code, FACS action description, and approximate overlay region names.
-- `results/detection_summary.csv`: detection count and detection rate overall or by metadata group.
-- `results/au_summary.csv`: mean AU values for detected images.
-- `results/emotion_predictions.csv`: top 3 possible emotions for each detected face.
-- `results/emotion_summary.csv`: mean emotion probabilities overall or by metadata group.
-- `results/plots/detection_rate.png`: face-detection success rate.
-- `results/plots/mean_au_heatmap.png`: average AU output.
-- `results/plots/mean_emotion_heatmap.png`: average emotion probabilities.
-- `results/au_overlays/`: processed images with detected AU face regions highlighted.
-
 ## AU Region Overlays
 
 Each run creates annotated copies of detected images. Highlighted regions are based on the 68 facial landmarks returned by the detector, so they should be treated as approximate region visualizations rather than exact FACS muscle boundaries.
@@ -81,7 +74,3 @@ By default, the script draws AUs with scores of `0.5` or higher. If no AU reache
 ```bash
 python facs_anime_analysis.py --backend pyfeat --input-dir data/images --output-dir results --au-overlay-threshold 0.4
 ```
-
-## Suggested Study Design
-
-Use a matched set with the same intended expressions across styles. For example, collect 20 anime, 20 comic, and 20 human-reference images for each expression category. The most important result is not just the AU number, but where the detector fails completely or returns inconsistent AU patterns for clearly labeled expressions.
