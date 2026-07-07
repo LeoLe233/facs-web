@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import shutil
 import subprocess
 import uuid
@@ -24,8 +25,16 @@ WEB_RUNS_DIR = BASE_DIR / "web_runs"
 UPLOAD_DIR = WEB_RUNS_DIR / "uploads"
 RESULTS_DIR = WEB_RUNS_DIR / "results"
 ALLOWED_EXTENSIONS = {extension.lstrip(".") for extension in IMAGE_EXTENSIONS}
-ANALYZER_PYTHON = Path(os.environ.get("FACS_ANALYZER_PYTHON", BASE_DIR / ".venv311" / "bin" / "python"))
 MAX_ANALYSIS_WORKERS = max(1, int(os.environ.get("FACS_WEB_MAX_WORKERS", "2")))
+
+
+def default_analyzer_python() -> Path:
+    executable = "python.exe" if sys.platform == "win32" else "python"
+    scripts_dir = "Scripts" if sys.platform == "win32" else "bin"
+    return BASE_DIR / ".venv311" / scripts_dir / executable
+
+
+ANALYZER_PYTHON = Path(os.environ.get("FACS_ANALYZER_PYTHON", default_analyzer_python()))
 
 
 app = Flask(__name__)

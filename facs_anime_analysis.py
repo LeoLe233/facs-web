@@ -214,6 +214,14 @@ def run_openface(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
 
 
 def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
+    if sys.version_info >= (3, 12):
+        raise RuntimeError(
+            "The Py-Feat backend requires Python 3.10 or 3.11 for this project. "
+            f"You are running Python {sys.version_info.major}.{sys.version_info.minor}. "
+            "On Windows, recreate the environment with `py -3.11 -m venv .venv311`, "
+            "activate it, then run `python -m pip install -r requirements.txt`."
+        )
+
     try:
         from feat.detector import Detectorv1
     except ImportError as exc:
@@ -221,6 +229,18 @@ def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
             "Py-Feat is not installed in this Python environment. "
             "Install it with `pip install py-feat`, or use --backend openface."
         ) from exc
+    except Exception as exc:
+        if "torchcodec" in str(exc).lower() or "libtorchcodec" in str(exc).lower():
+            raise RuntimeError(
+                "Py-Feat loaded, but TorchCodec could not load its Windows DLLs. "
+                "Use Python 3.11, reinstall the requirements inside that environment, "
+                "and install a full-shared FFmpeg build on Windows so its DLLs are on PATH. "
+                "A clean reset is usually fastest: `rmdir /s /q .venv311`, "
+                "`py -3.11 -m venv .venv311`, `.venv311\\Scripts\\activate`, "
+                "`python -m pip install --upgrade pip`, then "
+                "`python -m pip install -r requirements.txt`."
+            ) from exc
+        raise
 
     detector = Detectorv1(device="cpu")
     rows: list[pd.DataFrame] = []

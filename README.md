@@ -18,24 +18,24 @@ Runs as a website based on Flask on port 5001.
    cd facs-web
    ```
 
-2. **Create and activate a virtual environment:**
+2. **Create and activate a Python 3.11 virtual environment:**
 
    **On macOS/Linux:**
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
+   python3.11 -m venv .venv311
+   source .venv311/bin/activate
    ```
 
    **On Windows (Command Prompt):**
    ```cmd
-   python -m venv .venv
-   .venv\Scripts\activate
+   py -3.11 -m venv .venv311
+   .venv311\Scripts\activate
    ```
 
    **On Windows (PowerShell):**
    ```powershell
-   python -m venv .venv
-   .venv\Scripts\Activate.ps1
+   py -3.11 -m venv .venv311
+   .venv311\Scripts\Activate.ps1
    ```
 
 3. **Install dependencies:**
@@ -43,7 +43,32 @@ Runs as a website based on Flask on port 5001.
    pip install -r requirements.txt
    ```
 
-**Note:** `py-feat` is included only for Python versions below 3.12 because many AU model stacks lag behind the newest Python releases. If you are on Python 3.12 and Py-Feat does not install, create the environment with Python 3.10 or 3.11, or use the OpenFace backend.
+**Note:** `py-feat` is included only for Python versions below 3.12 because many AU model stacks lag behind the newest Python releases. Use Python 3.11 for the Py-Feat backend, or use the OpenFace backend.
+
+## Windows TorchCodec Fix
+
+If Windows shows an error like `Could not find module ... torchcodec\libtorchcodec_core4.dll`, rebuild the environment with Python 3.11. The error often happens when Python 3.12+ or the system Python is mixed with packages installed in `.venv311`.
+
+From the repository folder in Command Prompt:
+
+```cmd
+rmdir /s /q .venv311
+py -3.11 -m venv .venv311
+.venv311\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -c "import sys; print(sys.executable); from feat.detector import Detectorv1; print('py-feat ok')"
+python web_app.py
+```
+
+Also install a Windows FFmpeg **full-shared** build and make sure its `bin` folder is on `PATH`. TorchCodec loads FFmpeg DLLs at runtime, so the non-shared FFmpeg build can still fail even when `pip install -r requirements.txt` succeeds.
+
+If the app still uses the wrong Python, set `FACS_ANALYZER_PYTHON` to the virtual environment interpreter before starting Flask:
+
+```cmd
+set FACS_ANALYZER_PYTHON=%CD%\.venv311\Scripts\python.exe
+python web_app.py
+```
 
 ## Run With Py-Feat
 
