@@ -14,6 +14,7 @@ from werkzeug.utils import secure_filename
 
 from facs_anime_analysis import (
     IMAGE_EXTENSIONS,
+    configure_windows_ffmpeg_dlls,
     describe_au,
     emotion_columns,
     normalize_au_code,
@@ -91,7 +92,12 @@ def analyze_upload(image_path: Path, run_id: str) -> dict[str, object]:
         "--group-by",
         "style",
     ]
-    completed = subprocess.run(command, cwd=BASE_DIR, text=True, capture_output=True)
+    analyzer_env = os.environ.copy()
+    ffmpeg_dll_dirs = configure_windows_ffmpeg_dlls()
+    if ffmpeg_dll_dirs and not analyzer_env.get("FACS_FFMPEG_DLL_DIR"):
+        analyzer_env["FACS_FFMPEG_DLL_DIR"] = os.pathsep.join(str(path) for path in ffmpeg_dll_dirs)
+
+    completed = subprocess.run(command, cwd=BASE_DIR, text=True, capture_output=True, env=analyzer_env)
     if completed.returncode != 0 and not (run_output_dir / "au_results.csv").exists():
         details = completed.stderr.strip() or completed.stdout.strip() or "unknown error"
         raise RuntimeError(details[-1200:])

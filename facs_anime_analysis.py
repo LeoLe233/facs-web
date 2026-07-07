@@ -24,6 +24,87 @@ from tqdm import tqdm
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 AU_PREFIXES = ("AU", "au")
 EMOTION_COLUMNS = ("anger", "disgust", "fear", "happiness", "sadness", "surprise", "neutral")
+_WINDOWS_DLL_HANDLES: list[object] = []
+
+
+def _looks_like_ffmpeg_dll_dir(path: Path) -> bool:
+    try:
+        return (
+            path.is_dir()
+            and any(path.glob("avcodec-*.dll"))
+            and any(path.glob("avformat-*.dll"))
+            and any(path.glob("avutil-*.dll"))
+        )
+    except OSError:
+        return False
+
+
+def configure_windows_ffmpeg_dlls() -> list[Path]:
+    if sys.platform != "win32" or not hasattr(os, "add_dll_directory"):
+        return []
+
+    candidates: list[Path] = []
+    env_dirs = os.environ.get("FACS_FFMPEG_DLL_DIR", "")
+    for raw_path in [*env_dirs.split(os.pathsep), *os.environ.get("PATH", "").split(os.pathsep)]:
+        if raw_path:
+            candidates.append(Path(raw_path))
+
+    candidates.extend(
+        [
+            Path("C:/ffmpeg/bin"),
+            Path("C:/Program Files/ffmpeg/bin"),
+            Path("C:/Program Files (x86)/ffmpeg/bin"),
+            Path("C:/ProgramData/chocolatey/lib/ffmpeg/tools/ffmpeg/bin"),
+            Path("C:/Program Files/obs-studio/bin/64bit"),
+            Path("C:/Program Files/AMD/CNext/CNext"),
+            Path("C:/Program Files/AMD/WVR/bin/win64"),
+        ]
+    )
+
+    added: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.expanduser().resolve()
+        except OSError:
+            continue
+        key = str(resolved).lower()
+        if key in seen or not _looks_like_ffmpeg_dll_dir(resolved):
+            continue
+        seen.add(key)
+        _WINDOWS_DLL_HANDLES.append(os.add_dll_directory(str(resolved)))
+        added.append(resolved)
+    return added
+
+
+def windows_ffmpeg_hint() -> str:
+    if sys.platform != "win32":
+        return ""
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return "No ffmpeg executable was found on PATH."
+
+    try:
+        completed = subprocess.run(
+            [ffmpeg, "-version"],
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+    except Exception:
+        return f"ffmpeg was found at {ffmpeg}, but its version could not be checked."
+
+    first_line = completed.stdout.splitlines()[0] if completed.stdout else f"ffmpeg found at {ffmpeg}."
+    if "--enable-static" in completed.stdout and "--enable-shared" not in completed.stdout:
+        return (
+            f"{first_line} This appears to be a static/essentials build, which does not provide "
+            "the FFmpeg DLLs TorchCodec loads. Install a full-shared FFmpeg build, or set "
+            "FACS_FFMPEG_DLL_DIR to a directory containing avcodec-*.dll, avformat-*.dll, "
+            "and avutil-*.dll before starting the app."
+        )
+    return first_line
 
 
 @dataclass(frozen=True)
@@ -222,6 +303,8 @@ def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
             "activate it, then run `python -m pip install -r requirements.txt`."
         )
 
+    ffmpeg_dll_dirs = configure_windows_ffmpeg_dlls()
+
     try:
         from feat.detector import Detectorv1
     except ImportError as exc:
@@ -231,14 +314,18 @@ def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
         ) from exc
     except Exception as exc:
         if "torchcodec" in str(exc).lower() or "libtorchcodec" in str(exc).lower():
+            dll_dir_text = (
+                "Registered FFmpeg DLL directories: " + ", ".join(str(path) for path in ffmpeg_dll_dirs)
+                if ffmpeg_dll_dirs
+                else "No shared FFmpeg DLL directory was registered."
+            )
+            ffmpeg_text = windows_ffmpeg_hint()
             raise RuntimeError(
                 "Py-Feat loaded, but TorchCodec could not load its Windows DLLs. "
-                "Use Python 3.11, reinstall the requirements inside that environment, "
-                "and install a full-shared FFmpeg build on Windows so its DLLs are on PATH. "
-                "A clean reset is usually fastest: `rmdir /s /q .venv311`, "
-                "`py -3.11 -m venv .venv311`, `.venv311\\Scripts\\activate`, "
-                "`python -m pip install --upgrade pip`, then "
-                "`python -m pip install -r requirements.txt`."
+                "Install a Windows FFmpeg full-shared build, or set FACS_FFMPEG_DLL_DIR "
+                "to a directory containing avcodec-*.dll, avformat-*.dll, and avutil-*.dll "
+                "before starting the app. "
+                f"{dll_dir_text} {ffmpeg_text}"
             ) from exc
         raise
 

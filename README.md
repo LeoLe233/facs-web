@@ -47,7 +47,19 @@ Runs as a website based on Flask on port 5001.
 
 ## Windows TorchCodec Fix
 
-If Windows shows an error like `Could not find module ... torchcodec\libtorchcodec_core4.dll`, rebuild the environment with Python 3.11. The error often happens when Python 3.12+ or the system Python is mixed with packages installed in `.venv311`.
+If Windows shows an error like `Could not find module ... torchcodec\libtorchcodec_core4.dll`, first check FFmpeg. TorchCodec needs FFmpeg DLLs, not just `ffmpeg.exe`, and the Gyan `essentials_build` / static build does not provide the shared DLLs TorchCodec loads.
+
+Install a Windows FFmpeg **full-shared** build and make sure its `bin` folder is on `PATH`. You can also point the analyzer directly at a DLL folder:
+
+```cmd
+set FACS_FFMPEG_DLL_DIR=C:\path\to\ffmpeg\bin
+python -c "from feat.detector import Detectorv1; print('py-feat ok')"
+python web_app.py
+```
+
+The folder should contain files like `avcodec-*.dll`, `avformat-*.dll`, and `avutil-*.dll`.
+
+If that still fails, rebuild the environment with Python 3.11. The error can also happen when Python 3.12+ or the system Python is mixed with packages installed in `.venv311`.
 
 From the repository folder in Command Prompt:
 
@@ -60,8 +72,6 @@ python -m pip install -r requirements.txt
 python -c "import sys; print(sys.executable); from feat.detector import Detectorv1; print('py-feat ok')"
 python web_app.py
 ```
-
-Also install a Windows FFmpeg **full-shared** build and make sure its `bin` folder is on `PATH`. TorchCodec loads FFmpeg DLLs at runtime, so the non-shared FFmpeg build can still fail even when `pip install -r requirements.txt` succeeds.
 
 If the app still uses the wrong Python, set `FACS_ANALYZER_PYTHON` to the virtual environment interpreter before starting Flask:
 
