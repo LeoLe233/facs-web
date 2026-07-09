@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -109,6 +110,62 @@ def windows_ffmpeg_hint() -> str:
     return first_line
 
 
+def resolve_pyfeat_device(requested_device: str) -> str:
+    if requested_device == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+    if requested_device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError(
+            "Py-Feat was configured to use device='cuda', but torch.cuda.is_available() is False. "
+            "For an AMD GPU, install a ROCm-enabled PyTorch build in this Python environment; "
+            "ROCm PyTorch exposes AMD GPUs through the CUDA-compatible torch.cuda API. "
+            "If GPU acceleration is impossible on this machine, set FACS_PYFEAT_DEVICE=cpu "
+            "or run with --pyfeat-device cpu."
+        )
+
+    if requested_device == "mps" and not (
+        getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+    ):
+        raise RuntimeError(
+            "Py-Feat was configured to use device='mps', but the PyTorch MPS backend is unavailable. "
+            "Use --pyfeat-device auto or --pyfeat-device cpu instead."
+        )
+
+    return requested_device
+
+
+def install_image_only_torchcodec_stub_if_needed() -> bool:
+    try:
+        from torchcodec.decoders import VideoDecoder  # noqa: F401
+        return False
+    except Exception as exc:
+        if "torchcodec" not in str(exc).lower() and "libtorchcodec" not in str(exc).lower():
+            raise
+
+    class UnavailableVideoDecoder:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError(
+                "TorchCodec video decoding is unavailable in this environment. "
+                "This project only uses Py-Feat image detection, so video decoding was disabled."
+            )
+
+    for module_name in list(sys.modules):
+        if module_name == "torchcodec" or module_name.startswith("torchcodec."):
+            del sys.modules[module_name]
+
+    torchcodec_module = types.ModuleType("torchcodec")
+    decoders_module = types.ModuleType("torchcodec.decoders")
+    decoders_module.VideoDecoder = UnavailableVideoDecoder
+    torchcodec_module.decoders = decoders_module
+    sys.modules["torchcodec"] = torchcodec_module
+    sys.modules["torchcodec.decoders"] = decoders_module
+    return True
+
+
 @dataclass(frozen=True)
 class AnalysisConfig:
     input_dir: Path
@@ -116,6 +173,7 @@ class AnalysisConfig:
     backend: str
     metadata_csv: Path | None
     group_by: str | None
+    pyfeat_device: str
     openface_bin: str
     au_overlay_threshold: float
     au_overlay_top_n: int
@@ -297,15 +355,16 @@ def run_openface(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
 
 
 def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
-    if sys.version_info >= (3, 12):
+    if sys.version_info < (3, 11):
         raise RuntimeError(
-            "The Py-Feat backend requires Python 3.10 or 3.11 for this project. "
+            "The Py-Feat backend requires Python 3.11 or newer for this project. "
             f"You are running Python {sys.version_info.major}.{sys.version_info.minor}. "
-            "On Windows, recreate the environment with `py -3.11 -m venv .venv311`, "
+            "On Windows, recreate the environment with Python 3.12 and `.venv312`, "
             "activate it, then run `python -m pip install -r requirements.txt`."
         )
 
     ffmpeg_dll_dirs = configure_windows_ffmpeg_dlls()
+    torchcodec_stubbed = install_image_only_torchcodec_stub_if_needed()
 
     try:
         from feat.detector import Detectorv1
@@ -331,9 +390,9 @@ def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
             ) from exc
         raise
 
-    device = "cuda" if torch.cuda.is_available() else (
-        "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu"
-    )
+    device = resolve_pyfeat_device(config.pyfeat_device)
+    if torchcodec_stubbed:
+        print("TorchCodec video decoding is unavailable; continuing with image-only Py-Feat detection.")
     detector = Detectorv1(device=device)
     rows: list[pd.DataFrame] = []
 
@@ -725,6 +784,15 @@ def parse_args(argv: Iterable[str]) -> AnalysisConfig:
     parser.add_argument("--input-dir", type=Path, default=Path("data/images"), help="Folder containing input images.")
     parser.add_argument("--output-dir", type=Path, default=Path("results"), help="Folder for CSVs and plots.")
     parser.add_argument("--backend", choices=("pyfeat", "openface"), default="pyfeat", help="AU detector backend.")
+    parser.add_argument(
+        "--pyfeat-device",
+        choices=("cuda", "cpu", "mps", "auto"),
+        default=os.environ.get("FACS_PYFEAT_DEVICE", "cuda"),
+        help=(
+            "Device passed to Py-Feat. Use cuda for AMD GPUs with ROCm PyTorch; "
+            "ROCm exposes AMD GPUs through torch.cuda. Can also be set with FACS_PYFEAT_DEVICE."
+        ),
+    )
     parser.add_argument("--metadata-csv", type=Path, default=Path("data/metadata.csv"), help="Optional image metadata CSV.")
     parser.add_argument("--group-by", default="style", help="Metadata column for grouped summaries, e.g. style or expected_expression.")
     parser.add_argument(
@@ -752,6 +820,7 @@ def parse_args(argv: Iterable[str]) -> AnalysisConfig:
         backend=args.backend,
         metadata_csv=args.metadata_csv if args.metadata_csv.exists() else None,
         group_by=args.group_by,
+        pyfeat_device=args.pyfeat_device,
         openface_bin=args.openface_bin,
         au_overlay_threshold=args.au_overlay_threshold,
         au_overlay_top_n=args.au_overlay_top_n,

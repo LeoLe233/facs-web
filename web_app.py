@@ -32,6 +32,9 @@ MAX_ANALYSIS_WORKERS = max(1, int(os.environ.get("FACS_WEB_MAX_WORKERS", "2")))
 def default_analyzer_python() -> Path:
     executable = "python.exe" if sys.platform == "win32" else "python"
     scripts_dir = "Scripts" if sys.platform == "win32" else "bin"
+    venv312 = BASE_DIR / ".venv312" / scripts_dir / executable
+    if venv312.exists():
+        return venv312
     return BASE_DIR / ".venv311" / scripts_dir / executable
 
 
@@ -85,6 +88,8 @@ def analyze_upload(image_path: Path, run_id: str) -> dict[str, object]:
         str(BASE_DIR / "facs_anime_analysis.py"),
         "--backend",
         "pyfeat",
+        "--pyfeat-device",
+        os.environ.get("FACS_PYFEAT_DEVICE", "cuda"),
         "--input-dir",
         str(run_input_dir),
         "--output-dir",

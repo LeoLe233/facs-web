@@ -4,6 +4,7 @@ results/
 web_runs/
 .venv/
 .venv311/
+.venv312/
 data/
 results/
 .DS_Store
