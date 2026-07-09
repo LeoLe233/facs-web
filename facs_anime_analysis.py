@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+import torch
+
 Path(".cache/matplotlib").mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(Path(".cache/matplotlib").resolve()))
 os.environ.setdefault("XDG_CACHE_HOME", str(Path(".cache").resolve()))
@@ -329,7 +331,10 @@ def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
             ) from exc
         raise
 
-    detector = Detectorv1(device="cpu")
+    device = "cuda" if torch.cuda.is_available() else (
+        "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu"
+    )
+    detector = Detectorv1(device=device)
     rows: list[pd.DataFrame] = []
 
     for image_path in tqdm(images, desc="Running Py-Feat"):
@@ -765,10 +770,11 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     metadata = load_metadata(config.metadata_csv)
 
-    if config.backend == "openface":
-        results = run_openface(config, images)
-    else:
-        results = run_pyfeat(config, images)
+    # if config.backend == "openface":
+    #     results = run_openface(config, images)
+    #     print("Running OpenFace!")
+    # else:
+    results = run_pyfeat(config, images)
 
     results = attach_metadata(results, metadata)
     detection_summary = summarize_detection(results, config.group_by)
