@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Style Comparison · FACS Illustration Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="{{ url_for('static', filename='comparison.js') }}" defer></script>
+  </head>
+  <body>
+    <main class="shell comparison-shell" data-comparison-root>
+      <header class="comparison-header">
+        <div>
+          <a class="text-link" href="{{ url_for('index') }}">← Back to analyzer</a>
+          <h1>Style comparison</h1>
+          <p>Compare Py-Feat emotion and facial action unit results across Original, Disney, and Ghibli images.</p>
+        </div>
+        <div class="comparison-sample">
+          {% for style in styles %}
+            <span><b>{{ style.label }}</b> {{ style.detected }}/{{ style.images }} detected</span>
+          {% endfor %}
+        </div>
+      </header>
+
+      {% if styles %}
+        <section class="comparison-controls" aria-label="Styles shown">
+          <span>Show styles</span>
+          {% for style in styles %}
+            <label class="style-toggle style-{{ style.id }}">
+              <input type="checkbox" value="{{ style.id }}" checked data-style-toggle>
+              <i aria-hidden="true"></i>
+              {{ style.label }}
+            </label>
+          {% endfor %}
+        </section>
+
+        <section class="comparison-panel">
+          <div class="comparison-panel-head">
+            <div>
+              <h2>Mean emotion score</h2>
+              <p>Average model score across all 210 faces in each style.</p>
+            </div>
+            <strong data-emotion-detail aria-live="polite">Hover or focus a bar for its value.</strong>
+          </div>
+          <div class="chart-frame" data-emotion-chart></div>
+        </section>
+
+        <section class="comparison-panel">
+          <div class="comparison-panel-head">
+            <div>
+              <h2>Top predicted emotion mix</h2>
+              <p>Share of faces where each emotion received the highest score.</p>
+            </div>
+            <strong data-mix-detail aria-live="polite">Hover or focus a segment for its count.</strong>
+          </div>
+          <div class="mix-chart" data-mix-chart></div>
+          <div class="emotion-legend" data-emotion-legend></div>
+        </section>
+
+        <section class="comparison-panel">
+          <div class="comparison-panel-head au-heading">
+            <div>
+              <h2>Action unit activation rate</h2>
+              <p>DetectorV1 uses binary AU labels; each value is the share of faces where the AU was active.</p>
+            </div>
+            <label>
+              Order action units
+              <select data-au-order>
+                <option value="gap">Largest style difference</option>
+                <option value="average">Highest average activation</option>
+                <option value="code">AU code</option>
+              </select>
+            </label>
+          </div>
+          <div class="au-chart" data-au-chart></div>
+        </section>
+      {% else %}
+        <div class="notice">No comparison CSV files were found in <code>py-feat_results</code>.</div>
+      {% endif %}
+    </main>
+    <script id="comparison-data" type="application/json">{{ comparison_data|tojson }}</script>
+  </body>
+</html>

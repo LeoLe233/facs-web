@@ -86,6 +86,48 @@ python web_app.py
 python facs_anime_analysis.py --backend pyfeat --input-dir data/images --output-dir results --group-by style
 ```
 
+DetectorV1 uses Py-Feat's SVM AU model, so AU outputs are binary present/not-present labels rather than AU probabilities.
+
+Use DetectorV2 with:
+
+```bash
+python facs_anime_analysis.py --backend pyfeat-v2 --input-dir data/images --output-dir results --group-by style
+```
+
+The web app includes a backend selector for DetectorV1 and DetectorV2.
+
+Multiple web uploads are processed in one Py-Feat batch run instead of one process per image. The default web batch size is 4, with images padded to 640px for mixed-size batches. Override these before starting Flask:
+
+```bash
+FACS_WEB_PYFEAT_BATCH_SIZE=8 FACS_WEB_PYFEAT_OUTPUT_SIZE=768 python web_app.py
+```
+
+For command-line runs, use:
+
+```bash
+python facs_anime_analysis.py --backend pyfeat --pyfeat-batch-size 4 --pyfeat-output-size 640 --input-dir data/images --output-dir results
+```
+
+Py-Feat can be slow on the first image because it loads several models and may build local caches. It also has CPU-bound steps, so GPU acceleration may not remove all of the delay.
+
+The app auto-selects `cuda`, then Apple `mps`, then `cpu`. To force a device:
+
+```bash
+python facs_anime_analysis.py --backend pyfeat --pyfeat-device mps --input-dir data/images --output-dir results
+```
+
+For the web app, set an environment variable before starting Flask:
+
+```bash
+FACS_PYFEAT_DEVICE=mps python web_app.py
+```
+
+Check whether this machine supports MPS:
+
+```bash
+python -c "import torch; print(torch.backends.mps.is_available())"
+```
+
 ## Run With OpenFace
 
 Install OpenFace separately, then run:

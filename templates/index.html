@@ -12,9 +12,15 @@
         <div>
           <h1>FACS Illustration Analyzer</h1>
           <p>Upload anime, comic, or human face images to inspect face detection, AU scores, and possible emotions.</p>
+          <a class="text-link" href="{{ url_for('style_comparison') }}">Compare Original, Disney, and Ghibli results →</a>
         </div>
         <form class="upload-form" method="post" enctype="multipart/form-data" data-analysis-form>
           <input id="images" name="images" type="file" accept="image/*" multiple required>
+          <select name="backend" aria-label="Analysis backend">
+            {% for value, label in backends.items() %}
+              <option value="{{ value }}" {% if value == selected_backend %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
           <button type="submit">Analyze</button>
         </form>
       </section>
@@ -23,11 +29,22 @@
         <div class="working-box">
           <div class="working-title">
             <span class="spinner" aria-hidden="true"></span>
-            <strong>Working...</strong>
+            <strong data-progress-message>Preparing analysis…</strong>
           </div>
-          <p>Analyzing the image for face detection, AUs, and possible emotions.</p>
-          <div class="progress-track" role="progressbar" aria-label="Analysis in progress">
-            <i></i>
+          <div class="progress-details" aria-live="polite">
+            <span><b data-progress-completed>0</b> of <b data-progress-total>0</b> images processed</span>
+            <span data-progress-eta>Estimating time remaining…</span>
+          </div>
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="Images processed"
+            aria-valuemin="0"
+            aria-valuemax="0"
+            aria-valuenow="0"
+            data-progress-track
+          >
+            <i data-progress-bar></i>
           </div>
         </div>
       </div>
@@ -57,8 +74,26 @@
                 <div class="media-panel">
                   <div class="panel-head">
                     <h2>Processed Image</h2>
-                    <span>{{ result.filename }}</span>
+                    <span>{{ result.backend }} · {{ result.filename }}</span>
                   </div>
+                  <dl class="run-stats">
+                    <div>
+                      <dt>Accelerator</dt>
+                      <dd>{{ result.accelerator }}</dd>
+                    </div>
+                    <div>
+                      <dt>Process</dt>
+                      <dd>{{ "%.2f"|format(result.process_seconds) }}s</dd>
+                    </div>
+                    <div>
+                      <dt>Py-Feat</dt>
+                      <dd>{{ "%.2f"|format(result.pyfeat_seconds) }}s</dd>
+                    </div>
+                    <div>
+                      <dt>Batch</dt>
+                      <dd>{{ result.batch_size }}</dd>
+                    </div>
+                  </dl>
                   {% if result.overlay_urls %}
                     <img class="main-image" src="{{ result.overlay_urls[0] }}" alt="Detected AU overlay">
                   {% else %}
@@ -145,6 +180,12 @@
     <script>
       const form = document.querySelector("[data-analysis-form]");
       const workingPanel = document.querySelector("[data-working-panel]");
+      const progressMessage = document.querySelector("[data-progress-message]");
+      const progressCompleted = document.querySelector("[data-progress-completed]");
+      const progressTotal = document.querySelector("[data-progress-total]");
+      const progressEta = document.querySelector("[data-progress-eta]");
+      const progressTrack = document.querySelector("[data-progress-track]");
+      const progressBar = document.querySelector("[data-progress-bar]");
       const slides = Array.from(document.querySelectorAll("[data-result-slide]"));
       const prevButton = document.querySelector("[data-result-prev]");
       const nextButton = document.querySelector("[data-result-next]");
@@ -152,14 +193,87 @@
       const resultPosition = document.querySelector("[data-result-position]");
       let activeSlide = 0;
 
+      function formatEta(seconds) {
+        if (seconds === null || seconds === undefined) return "Estimating time remaining…";
+        if (seconds <= 1) return "Less than a minute remaining";
+        if (seconds < 60) return `${Math.ceil(seconds)} seconds remaining`;
+        const minutes = Math.ceil(seconds / 60);
+        return `About ${minutes} minute${minutes === 1 ? "" : "s"} remaining`;
+      }
+
+      function updateProgress(job) {
+        const completed = Number(job.completed || 0);
+        const total = Number(job.total || 0);
+        const percent = total ? Math.min(100, (completed / total) * 100) : 0;
+        if (progressMessage) progressMessage.textContent = job.message || "Analyzing images…";
+        if (progressCompleted) progressCompleted.textContent = String(completed);
+        if (progressTotal) progressTotal.textContent = String(total);
+        if (progressEta) {
+          progressEta.textContent = job.status === "completed" ? "Complete" : formatEta(job.eta_seconds);
+        }
+        if (progressBar) progressBar.style.width = `${percent}%`;
+        if (progressTrack) {
+          progressTrack.setAttribute("aria-valuemax", String(total));
+          progressTrack.setAttribute("aria-valuenow", String(completed));
+        }
+      }
+
+      function restoreForm(errorMessage) {
+        const button = form?.querySelector("button[type='submit']");
+        form?.classList.remove("is-submitting");
+        if (button) {
+          button.disabled = false;
+          button.textContent = "Analyze";
+        }
+        if (progressMessage) progressMessage.textContent = errorMessage;
+        if (progressEta) progressEta.textContent = "Please try again.";
+        document.querySelector(".spinner")?.classList.add("is-stopped");
+      }
+
+      async function pollAnalysis(statusUrl) {
+        try {
+          const response = await fetch(statusUrl, { cache: "no-store" });
+          const job = await response.json();
+          if (!response.ok) throw new Error(job.error || "Could not read analysis progress.");
+          updateProgress(job);
+          if (job.status === "completed") {
+            window.location.assign(job.results_url);
+            return;
+          }
+          if (job.status === "failed") {
+            restoreForm(job.message || "Analysis failed.");
+            return;
+          }
+          window.setTimeout(() => pollAnalysis(statusUrl), 750);
+        } catch (error) {
+          restoreForm(error.message || "Analysis progress was interrupted.");
+        }
+      }
+
       if (form && workingPanel) {
-        form.addEventListener("submit", () => {
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
           const button = form.querySelector("button[type='submit']");
+          const selectedFiles = form.querySelector("input[type='file']")?.files;
           workingPanel.hidden = false;
           form.classList.add("is-submitting");
+          document.querySelector(".spinner")?.classList.remove("is-stopped");
+          updateProgress({ completed: 0, total: selectedFiles?.length || 0, message: "Uploading images…" });
           if (button) {
             button.disabled = true;
             button.textContent = "Analyzing...";
+          }
+
+          try {
+            const response = await fetch("{{ url_for('start_analysis') }}", {
+              method: "POST",
+              body: new FormData(form),
+            });
+            const job = await response.json();
+            if (!response.ok) throw new Error(job.error || "Could not start analysis.");
+            pollAnalysis(job.status_url);
+          } catch (error) {
+            restoreForm(error.message || "Could not start analysis.");
           }
         });
       }

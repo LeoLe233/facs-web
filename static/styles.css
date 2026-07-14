@@ -58,22 +58,41 @@ h1 {
   font-size: 15px;
 }
 
+.text-link {
+  display: inline-block;
+  margin-top: 9px;
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
 .upload-form {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) 132px auto;
   gap: 10px;
   align-items: center;
   justify-self: end;
   width: 100%;
 }
 
-input[type="file"] {
+input[type="file"],
+select {
   width: 100%;
   min-height: 42px;
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
+}
+
+select {
+  color: var(--ink);
+  font: inherit;
 }
 
 button,
@@ -102,7 +121,8 @@ button:disabled {
   opacity: 0.72;
 }
 
-.upload-form.is-submitting input {
+.upload-form.is-submitting input,
+.upload-form.is-submitting select {
   opacity: 0.65;
   pointer-events: none;
 }
@@ -130,10 +150,18 @@ button:disabled {
   font-size: 15px;
 }
 
-.working-box p {
-  margin-top: 6px;
+.progress-details {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
   color: var(--muted);
   font-size: 14px;
+}
+
+.progress-details b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 .spinner {
@@ -143,6 +171,11 @@ button:disabled {
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+.spinner.is-stopped {
+  animation: none;
+  border-color: #d46f39;
 }
 
 .progress-track {
@@ -157,25 +190,15 @@ button:disabled {
 .progress-track i {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 42%;
+  width: 0;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--accent), var(--warm));
-  animation: progress-slide 1.15s ease-in-out infinite;
+  transition: width 0.35s ease;
 }
 
 @keyframes spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes progress-slide {
-  0% {
-    transform: translateX(-110%);
-  }
-
-  100% {
-    transform: translateX(245%);
   }
 }
 
@@ -280,6 +303,37 @@ button:disabled {
   font-size: 13px;
   overflow-wrap: anywhere;
   text-align: right;
+}
+
+.run-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 16px;
+}
+
+.run-stats div {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  background: #fbfcf9;
+}
+
+.run-stats dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.run-stats dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 760;
 }
 
 .main-image {
@@ -420,6 +474,278 @@ button:disabled {
   max-width: 560px;
 }
 
+.comparison-shell {
+  max-width: 1240px;
+}
+
+.comparison-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+  padding: 12px 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.comparison-header h1 {
+  margin-top: 12px;
+}
+
+.comparison-header p,
+.comparison-panel-head p {
+  margin-top: 7px;
+  color: var(--muted);
+}
+
+.comparison-sample {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 8px 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.comparison-sample b {
+  color: var(--ink);
+}
+
+.comparison-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin: 18px 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.style-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.style-toggle i,
+.emotion-legend i {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+}
+
+.style-original i,
+.style-fill-original {
+  fill: #3178b7;
+  background: #3178b7;
+}
+
+.style-disney i,
+.style-fill-disney {
+  fill: #d46f39;
+  background: #d46f39;
+}
+
+.style-ghibli i,
+.style-fill-ghibli {
+  fill: #187f78;
+  background: #187f78;
+}
+
+.comparison-panel {
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.comparison-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: start;
+}
+
+.comparison-panel-head h2 {
+  font-size: 18px;
+}
+
+.comparison-panel-head > strong {
+  max-width: 360px;
+  color: var(--accent-strong);
+  font-size: 13px;
+  text-align: right;
+}
+
+.chart-frame {
+  margin-top: 14px;
+  min-height: 300px;
+}
+
+.chart-frame svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.chart-gridline {
+  stroke: #dfe4df;
+  stroke-width: 1;
+}
+
+.chart-axis-label {
+  fill: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.emotion-bar {
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.emotion-bar:hover,
+.emotion-bar:focus {
+  filter: brightness(0.86);
+  outline: none;
+}
+
+.mix-chart {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.mix-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.mix-row > strong {
+  font-size: 14px;
+}
+
+.mix-bar {
+  display: flex;
+  overflow: hidden;
+  min-height: 34px;
+  border-radius: 5px;
+  background: #edf0ec;
+}
+
+.mix-segment {
+  min-width: 1px;
+  transition: filter 0.15s ease;
+}
+
+.mix-segment:hover,
+.mix-segment:focus {
+  filter: brightness(0.82);
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.emotion-fill-1 { background: #ba4c45; }
+.emotion-fill-2 { background: #8b5c97; }
+.emotion-fill-3 { background: #5979ad; }
+.emotion-fill-4 { background: #d69b32; }
+.emotion-fill-5 { background: #6d8f68; }
+.emotion-fill-6 { background: #d97955; }
+.emotion-fill-7 { background: #66747b; }
+
+.emotion-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.emotion-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.au-heading label {
+  display: grid;
+  gap: 5px;
+  min-width: 230px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.au-heading select {
+  min-height: 38px;
+  color: var(--ink);
+}
+
+.au-chart {
+  margin-top: 18px;
+}
+
+.au-comparison-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 18px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.au-comparison-label strong,
+.au-comparison-label span {
+  display: block;
+}
+
+.au-comparison-label span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.au-style-bars {
+  display: grid;
+  gap: 6px;
+}
+
+.au-style-line {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 42px;
+  gap: 9px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.au-style-line > span {
+  color: var(--muted);
+}
+
+.au-style-line > div {
+  overflow: hidden;
+  height: 9px;
+  border-radius: 999px;
+  background: #e7ebe5;
+}
+
+.au-style-line i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.au-style-line b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 920px) {
   .toolbar,
   .result-grid,
@@ -431,6 +757,10 @@ button:disabled {
     justify-self: stretch;
   }
 
+  .run-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .main-image {
     max-height: none;
   }
@@ -439,6 +769,21 @@ button:disabled {
     align-items: center;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .comparison-header,
+  .comparison-panel-head {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .comparison-sample {
+    justify-content: start;
+  }
+
+  .comparison-panel-head > strong {
+    max-width: none;
+    text-align: left;
   }
 }
 
@@ -456,6 +801,11 @@ button:disabled {
     font-size: 23px;
   }
 
+  .progress-details {
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .bar-row,
   .bar-row.compact {
     grid-template-columns: 74px 1fr 40px;
@@ -463,5 +813,19 @@ button:disabled {
 
   .bar-row.au-row {
     grid-template-columns: 104px 1fr 40px;
+  }
+
+  .comparison-panel {
+    padding: 13px;
+  }
+
+  .au-comparison-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .mix-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
   }
 }

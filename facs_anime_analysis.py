@@ -5,11 +5,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-
-import torch
 
 Path(".cache/matplotlib").mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(Path(".cache/matplotlib").resolve()))
@@ -25,7 +24,24 @@ from tqdm import tqdm
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 AU_PREFIXES = ("AU", "au")
-EMOTION_COLUMNS = ("anger", "disgust", "fear", "happiness", "sadness", "surprise", "neutral")
+PYFEAT_BACKENDS = {"pyfeat", "pyfeat-v1", "pyfeat-v2"}
+EMOTION_COLUMNS = (
+    "anger",
+    "disgust",
+    "fear",
+    "happiness",
+    "sadness",
+    "surprise",
+    "neutral",
+    "Anger",
+    "Disgust",
+    "Fear",
+    "Happy",
+    "Sad",
+    "Surprise",
+    "Neutral",
+    "Contempt",
+)
 _WINDOWS_DLL_HANDLES: list[object] = []
 
 
@@ -117,6 +133,9 @@ class AnalysisConfig:
     metadata_csv: Path | None
     group_by: str | None
     openface_bin: str
+    pyfeat_device: str
+    pyfeat_batch_size: int
+    pyfeat_output_size: int | None
     au_overlay_threshold: float
     au_overlay_top_n: int
 
@@ -296,6 +315,62 @@ def run_openface(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
     return results
 
 
+def select_pyfeat_device(requested_device: str) -> str:
+    import torch
+
+    requested = (requested_device or "auto").strip().lower()
+    valid_devices = {"auto", "cpu", "cuda", "mps"}
+    if requested not in valid_devices:
+        raise RuntimeError(
+            f"Unsupported Py-Feat device: {requested_device}. "
+            "Use one of: auto, cpu, cuda, mps."
+        )
+    has_mps_backend = getattr(torch.backends, "mps", None) is not None
+    mps_available = bool(has_mps_backend and torch.backends.mps.is_available())
+    cuda_available = torch.cuda.is_available()
+
+    if requested == "cuda" and not cuda_available:
+        raise RuntimeError("Py-Feat device was set to cuda, but PyTorch does not report CUDA as available.")
+    if requested == "mps" and not mps_available:
+        raise RuntimeError("Py-Feat device was set to mps, but PyTorch does not report Apple MPS as available.")
+    if requested != "auto":
+        return requested
+
+    if cuda_available:
+        return "cuda"
+    if mps_available:
+        return "mps"
+    return "cpu"
+
+
+def pyfeat_detector_name(backend: str) -> str:
+    return "Detectorv2" if backend == "pyfeat-v2" else "Detectorv1"
+
+
+def load_pyfeat_detector_class(backend: str):
+    if backend == "pyfeat-v2":
+        try:
+            from feat import Detectorv2
+        except ImportError:
+            try:
+                from feat.detector_v2 import Detectorv2
+            except ImportError as exc:
+                raise RuntimeError(
+                    "This Py-Feat installation does not provide Detectorv2. "
+                    "Upgrade py-feat, or use `--backend pyfeat` for Detectorv1."
+                ) from exc
+        return Detectorv2
+
+    try:
+        from feat.detector import Detectorv1
+    except ImportError as exc:
+        raise RuntimeError(
+            "Py-Feat is not installed in this Python environment. "
+            "Install it with `pip install py-feat`, or use --backend openface."
+        ) from exc
+    return Detectorv1
+
+
 def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
     if sys.version_info >= (3, 12):
         raise RuntimeError(
@@ -307,13 +382,10 @@ def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
 
     ffmpeg_dll_dirs = configure_windows_ffmpeg_dlls()
 
+    detector_name = pyfeat_detector_name(config.backend)
+
     try:
-        from feat.detector import Detectorv1
-    except ImportError as exc:
-        raise RuntimeError(
-            "Py-Feat is not installed in this Python environment. "
-            "Install it with `pip install py-feat`, or use --backend openface."
-        ) from exc
+        detector_class = load_pyfeat_detector_class(config.backend)
     except Exception as exc:
         if "torchcodec" in str(exc).lower() or "libtorchcodec" in str(exc).lower():
             dll_dir_text = (
@@ -331,30 +403,88 @@ def run_pyfeat(config: AnalysisConfig, images: list[Path]) -> pd.DataFrame:
             ) from exc
         raise
 
-    device = "cuda" if torch.cuda.is_available() else (
-        "mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu"
-    )
-    detector = Detectorv1(device=device)
-    rows: list[pd.DataFrame] = []
-
-    for image_path in tqdm(images, desc="Running Py-Feat"):
+    device = select_pyfeat_device(config.pyfeat_device)
+    print(f"Using Py-Feat backend: {detector_name}")
+    print(f"Using Py-Feat device: {device}")
+    detector_kwargs = {"device": device}
+    if config.backend != "pyfeat-v2":
+        detector_kwargs["au_model"] = "svm"
+    detector = detector_class(**detector_kwargs)
+    image_paths = [str(image_path) for image_path in images]
+    print(f"Running Py-Feat batch size: {config.pyfeat_batch_size}")
+    pyfeat_started_at = time.perf_counter()
+    detected_batches: list[pd.DataFrame] = []
+    for batch_start in range(0, len(image_paths), config.pyfeat_batch_size):
+        batch_paths = image_paths[batch_start : batch_start + config.pyfeat_batch_size]
         try:
-            detected = detector.detect(str(image_path), progress_bar=False)
-            frame = pd.DataFrame(detected)
-            if frame.empty:
-                frame = pd.DataFrame([{"success": False}])
+            detected_batch = pd.DataFrame(
+                detector.detect(
+                    batch_paths,
+                    batch_size=len(batch_paths),
+                    output_size=config.pyfeat_output_size,
+                    progress_bar=False,
+                )
+            )
+            if detected_batch.empty:
+                detected_batch = pd.DataFrame(
+                    [
+                        {"image_path": image_path, "filename": Path(image_path).name, "success": False}
+                        for image_path in batch_paths
+                    ]
+                )
             else:
-                face_cols = [col for col in ("FaceRectX", "FaceRectY", "FaceRectWidth", "FaceRectHeight") if col in frame]
-                frame["success"] = ~frame[face_cols].isna().all(axis=1) if face_cols else True
-        except Exception as exc:  # The exception text is useful for failure analysis.
-            frame = pd.DataFrame([{"success": False, "error": str(exc)}])
+                input_col = "input" if "input" in detected_batch.columns else None
+                if input_col:
+                    detected_batch.insert(0, "image_path", detected_batch[input_col].astype(str))
+                else:
+                    detected_batch.insert(0, "image_path", [batch_paths[0]] * len(detected_batch))
+                detected_batch.insert(
+                    1,
+                    "filename",
+                    detected_batch["image_path"].map(lambda value: Path(str(value)).name),
+                )
 
-        frame.insert(0, "image_path", str(image_path))
-        frame.insert(1, "filename", image_path.name)
-        frame.insert(2, "backend", "pyfeat")
-        rows.append(frame)
+                face_cols = [
+                    col
+                    for col in ("FaceRectX", "FaceRectY", "FaceRectWidth", "FaceRectHeight")
+                    if col in detected_batch
+                ]
+                detected_batch["success"] = (
+                    ~detected_batch[face_cols].isna().all(axis=1) if face_cols else True
+                )
+        except Exception as exc:  # Continue so one bad batch does not hide later progress.
+            detected_batch = pd.DataFrame(
+                [
+                    {
+                        "image_path": image_path,
+                        "filename": Path(image_path).name,
+                        "success": False,
+                        "error": str(exc),
+                    }
+                    for image_path in batch_paths
+                ]
+            )
 
-    return pd.concat(rows, ignore_index=True)
+        detected_batches.append(detected_batch)
+        completed_images = min(batch_start + len(batch_paths), len(image_paths))
+        print(f"FACS_PROGRESS {completed_images} {len(image_paths)}", flush=True)
+
+    pyfeat_runtime_seconds = time.perf_counter() - pyfeat_started_at
+    frame = pd.concat(detected_batches, ignore_index=True) if detected_batches else pd.DataFrame()
+
+    if frame.empty:
+        frame = pd.DataFrame(
+            [{"image_path": str(image_path), "filename": image_path.name, "success": False} for image_path in images]
+        )
+
+    frame.insert(2, "backend", config.backend)
+    frame.insert(3, "pyfeat_detector", detector_name)
+    frame.insert(4, "pyfeat_device", device)
+    frame.insert(5, "pyfeat_runtime_seconds", round(pyfeat_runtime_seconds, 3))
+    if config.backend != "pyfeat-v2":
+        frame.insert(6, "pyfeat_au_model", "svm")
+
+    return frame.reset_index(drop=True)
 
 
 def summarize_detection(results: pd.DataFrame, group_by: str | None) -> pd.DataFrame:
@@ -724,7 +854,12 @@ def parse_args(argv: Iterable[str]) -> AnalysisConfig:
     parser = argparse.ArgumentParser(description="Run FACS/AU analysis on anime, comic, or human-face images.")
     parser.add_argument("--input-dir", type=Path, default=Path("data/images"), help="Folder containing input images.")
     parser.add_argument("--output-dir", type=Path, default=Path("results"), help="Folder for CSVs and plots.")
-    parser.add_argument("--backend", choices=("pyfeat", "openface"), default="pyfeat", help="AU detector backend.")
+    parser.add_argument(
+        "--backend",
+        choices=("pyfeat", "pyfeat-v1", "pyfeat-v2", "openface"),
+        default="pyfeat",
+        help="AU detector backend. `pyfeat` and `pyfeat-v1` use Detectorv1; `pyfeat-v2` uses Detectorv2.",
+    )
     parser.add_argument("--metadata-csv", type=Path, default=Path("data/metadata.csv"), help="Optional image metadata CSV.")
     parser.add_argument("--group-by", default="style", help="Metadata column for grouped summaries, e.g. style or expected_expression.")
     parser.add_argument(
@@ -744,7 +879,29 @@ def parse_args(argv: Iterable[str]) -> AnalysisConfig:
         default="FeatureExtraction",
         help="OpenFace FeatureExtraction binary path. Can also be set with OPENFACE_BIN.",
     )
+    parser.add_argument(
+        "--pyfeat-device",
+        choices=("auto", "cpu", "cuda", "mps"),
+        default=os.environ.get("FACS_PYFEAT_DEVICE", "auto"),
+        help="Device for the Py-Feat backend. Defaults to FACS_PYFEAT_DEVICE or auto.",
+    )
+    parser.add_argument(
+        "--pyfeat-batch-size",
+        type=int,
+        default=int(os.environ.get("FACS_PYFEAT_BATCH_SIZE", "1")),
+        help="Number of images Py-Feat should process per batch.",
+    )
+    parser.add_argument(
+        "--pyfeat-output-size",
+        type=int,
+        default=int(os.environ.get("FACS_PYFEAT_OUTPUT_SIZE", "0")),
+        help="Optional square padded image size for Py-Feat batching. Use 0 to keep original sizes.",
+    )
     args = parser.parse_args(list(argv))
+    if args.pyfeat_batch_size < 1:
+        parser.error("--pyfeat-batch-size must be at least 1.")
+    if args.pyfeat_output_size < 0:
+        parser.error("--pyfeat-output-size must be 0 or greater.")
 
     return AnalysisConfig(
         input_dir=args.input_dir,
@@ -753,6 +910,9 @@ def parse_args(argv: Iterable[str]) -> AnalysisConfig:
         metadata_csv=args.metadata_csv if args.metadata_csv.exists() else None,
         group_by=args.group_by,
         openface_bin=args.openface_bin,
+        pyfeat_device=args.pyfeat_device,
+        pyfeat_batch_size=args.pyfeat_batch_size,
+        pyfeat_output_size=args.pyfeat_output_size or None,
         au_overlay_threshold=args.au_overlay_threshold,
         au_overlay_top_n=args.au_overlay_top_n,
     )
@@ -770,11 +930,11 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     metadata = load_metadata(config.metadata_csv)
 
-    # if config.backend == "openface":
-    #     results = run_openface(config, images)
-    #     print("Running OpenFace!")
-    # else:
-    results = run_pyfeat(config, images)
+    if config.backend == "openface":
+        results = run_openface(config, images)
+        print("Running OpenFace!")
+    else:
+        results = run_pyfeat(config, images)
 
     results = attach_metadata(results, metadata)
     detection_summary = summarize_detection(results, config.group_by)
